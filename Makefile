@@ -4,7 +4,7 @@ AVRDUDEMCU=m32
 CC=/usr/bin/avr-gcc
 CFLAGS=-g -Os -Wall -mcall-prologues -mmcu=$(MCU)
 OBJ2HEX=/usr/bin/avr-objcopy
-AVRDUDE=/usr/local/bin/avrdude
+AVRDUDE=/usr/bin/avrdude
 TARGET=blue
 
 all :
