@@ -6,48 +6,83 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #define DEBOUNCE_TIME 25 //Used to make sure the button was supposed to be pressed
-#define BAUD_RATE 103 //9600 for a clock of 16 MHz
+#define BAUD_RATE 51  //19.2k for a clock of 16 MHz
+#define DEBUG_ON PORTC |= 0x02
+#define DEBUG_OFF PORTC &= ~(0x02);
 
 void uart_init();
-//void adc_init();
-//uint16_t adc_read();
+void adc_init();
+int adc_read(unsigned char admuxVal);
+void adc_readData();
 void uart_sendChar(char data);
 void uart_sendStr(char *data);
-//void buttons_init();
-//void adc_send(char *data);
+void buttons_init();
+
+unsigned char READING_UART_FLAG = 0, READ_UART = 0, READ_ADC_FLAG = 0, READING_ADC = 0, SEND_TITLE = 0;
 
 int main(void){
 	
-	//Initialize uart control
 	uart_init();
-	//buttons_init();
-	//adc_init();
+	buttons_init();
+	adc_init();
 	
-//	uint16_t str;
-	while(1){			
-		/*if(!(PINA & 0x01)){
-			_delay_ms(DEBOUNCE_TIME);
-			if(!(PINA & 0x01)){
-				uart_sendChar(str);
-				str++;
-			}
-		}*/		
+	while(1){	
 		
+		int adc = adc_read(0x00);
+		_delay_ms(100);
+		
+		if(adc > 700){
+			DEBUG_ON;
+		} else {
+			DEBUG_OFF;
+		}
+				
+		if(READ_UART){
+			if (READ_ADC_FLAG) {
+				READ_ADC_FLAG = 0;
+				READING_ADC = 1;
+				adc_readData();
+				READING_ADC = 0;
+			}
+			else if(SEND_TITLE){
+				uart_sendStr("adc0\tadc1\tadc2\tadc3\tadc4");
+				uart_sendStr("____\t____\t____\t____\t____");
+				SEND_TITLE = 0;
+			}
+			else {
+				if(PINC & (1 << PC0))
+					uart_sendStr("Turning light on!");
+				else 
+					uart_sendStr("Turning light off!");	
+			}
+			READ_UART = 0;
+		}
 	}
 	return 0;
 }
 
 ISR(USART_RXC_vect){
+	READING_UART_FLAG = 1;
 	char data = UDR;
 	if(data == 'h'){
-		PORTA |= 0x80;
+		PORTC |= 0x01;
 	}
 	else if(data == 'l'){
-		PORTA &= ~(0x80);
+		PORTC &= ~(0x01);
+	} 
+	else if(data == 'r'){
+		READ_ADC_FLAG = 1;
 	}
-	uart_sendChar(data);
+	else if(data == 't'){
+		SEND_TITLE = 1;
+	}
+	else if(data == '\n'){
+		READING_UART_FLAG = 0;
+		READ_UART = 1;
+	}
 }
 
 
@@ -68,9 +103,10 @@ void uart_init(){
 	
 	sei();
 }
+
 void uart_sendChar(char data){
 	//Waits until it can transmit again then sends data
-	while(!(UCSRA & 0x20));
+	while(!(UCSRA & 0xA0));
 	UDR = data;
 }
 
@@ -86,61 +122,56 @@ void uart_sendStr(char *data){
 }
 void buttons_init(){
 	
+	//Disable JTAG twice for regular PORTC i/o
+	MCUCSR |= (1 << JTD);
+	MCUCSR |= (1 << JTD);
+	
 	//Sets PORTC to input & output (0 INPUT, 1 OUTPUT)
-	//DDRA = 0xFE;
+	DDRC = 0xFF;
 	
 	//Sets PORTC intial value to LOW (0 LOW, 1 HIGH)
-	//PORTA = 0x01;
-	
-	/*//Disable JTAG twice for regular PORTC i/o
-	MCUCSR |= (1 << JTD);
-	MCUCSR |= (1 << JTD); */
+	PORTC = 0x00;
 }
-//void adc_init(){
+void adc_init(){
 	
-	//Sets ADC0 & ADC1 to output
-//	DDRA = 0xFC;
+	//Sets ADC0-4 to input
+	DDRA = 0x00;
 		
-//	PORTA = 0x02;
+	//Sets PORTA0-4 to High
+	PORTA = 0xFF;
 	
-	//Sets ADC voltage reference to AVCC and D- ADC0, D+ ADC1
-//	ADMUX = 0x49;
+	//Sets ADC reading to ADC0 first
+	ADMUX = 0x00;
 	
-	//Enables ADC and sets division factor to 128
-//	ADCSRA = 0x87;
+	//Enables ADC & sets division factor to 128
+	ADCSRA = 0x87;
 	
-//}
+}
 
+void adc_readData(){
+	int adcVals[5];
+	char str[50];
+	for(unsigned char admuxVal = 0; admuxVal < 5; admuxVal++){
+		adcVals[admuxVal] = adc_read(admuxVal);
+		_delay_ms(50);
+	}
+	sprintf(str, "  %d  \t%d  \t%d  \t%d  \t%d", adcVals[0], adcVals[1], adcVals[2], adcVals[3], adcVals[4]);
+	uart_sendStr(str);
+}
 
-//uint16_t adc_read(){
+int adc_read(unsigned char admuxVal){
 
-//	uint8_t low; //Will collect the left hand bits 0 - 7
-//	uint16_t adc; //Will combine the right hand and left hand bits 9 & 8 and 7 - 0
+	uint8_t low; //Will collect the left hand bits 0 - 7
+	int adc; //Will combine the right hand and left hand bits 9 & 8 and 7 - 0
 
-//	ADCSRA |= (1 << ADSC); //ADSC - Analog Digital Start Conversion
-//	while(ADCSRA & (1 << ADSC)); //Loop around until conversion is finished
+	ADMUX = admuxVal;
 
-//	low = ADCL; //Set the left hand bits to low
-//	adc = (ADCH << 8) | low; //Combine all the bits together
+	ADCSRA |= (1 << ADSC); //ADSC - Analog Digital Start Conversion
+	while(ADCSRA & (1 << ADSC)); //Loop around until conversion is finished
 
-//	return adc; //Returns the number 0 - 1024
-//}
+	low = ADCL; //Set the left hand bits to low
+	adc = (ADCH << 8) | low; //Combine all the bits together
 
-//void adc_send(char *data){
-	
-//	DDRA |= 0x02;
-	
-//	while(*data != '\0'){
-		
-//		ADCH = 0b00;
-//		ADCL = data;
-		
-//		ADCSRA |= (1 << ADSC); //ADSC - Analog Digital Start Conversion
-//		while(ADCSRA & (1 << ADSC)); //Loop around until conversion is finished
-		
-//	}
-		
-//	DDRA &= ~(0x02);
-//}
-//Send a byte over USART to device
+	return adc; //Returns the number 0 - 1024
+}
 
